@@ -1,0 +1,71 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * Colours are defined once as CSS variables and exposed to Tailwind through
+ * @theme, so a clinic-specific palette is a one-file change. Teal reads as
+ * clinical without the coldness of pure blue, and the neutral ramp keeps
+ * dense appointment tables legible.
+ */
+@theme {
+  --color-brand-50: #eefdfb;
+  --color-brand-100: #d3f7f3;
+  --color-brand-200: #abeee9;
+  --color-brand-300: #72dfd9;
+  --color-brand-400: #38c6c2;
+  --color-brand-500: #1ea9a7;
+  --color-brand-600: #158888;
+  --color-brand-700: #156c6d;
+  --color-brand-800: #155658;
+  --color-brand-900: #154849;
+  --color-brand-950: #062a2c;
+
+  --color-ink-50: #f7f8f9;
+  --color-ink-100: #eef0f2;
+  --color-ink-200: #d9dde2;
+  --color-ink-300: #b7bfc8;
+  --color-ink-400: #8f9ba8;
+  --color-ink-500: #71808d;
+  --color-ink-600: #5a6774;
+  --color-ink-700: #4a545f;
+  --color-ink-800: #3f4750;
+  --color-ink-900: #383e45;
+  --color-ink-950: #24282d;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-ink-50 text-ink-900 font-sans antialiased;
+}
+
+/* Visible focus for keyboard users -- reception staff work fast and often
+   navigate forms entirely by keyboard. */
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-brand-500;
+}
+
+/* Tabular figures keep counts and currency columns aligned. */
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Entry animation for the floating notification card. Defined here because
+   Tailwind's arbitrary `animate-[…]` utility needs the keyframes to exist. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
