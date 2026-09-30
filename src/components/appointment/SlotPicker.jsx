@@ -125,7 +125,39 @@ export function SlotPicker({
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+            {/* Mobile: horizontal scroll row; desktop: grid */}
+            <div className="flex gap-2 overflow-x-auto pb-1 sm:hidden">
+              {availability.slots.map((slot) => {
+                const isSelected = selected === slot.time;
+                const disabled = !slot.is_bookable;
+                return (
+                  <button
+                    key={slot.time}
+                    type="button"
+                    disabled={disabled}
+                    title={slot.unavailable_reason ?? `${slot.available} of ${slot.capacity} free`}
+                    onClick={() => onSelect(slot.time)}
+                    className={[
+                      'shrink-0 rounded-lg border px-3 py-2.5 text-center transition-colors',
+                      disabled
+                        ? 'cursor-not-allowed border-ink-200 bg-ink-50 text-ink-400'
+                        : isSelected
+                          ? 'border-brand-600 bg-brand-600 text-white'
+                          : 'border-ink-300 bg-white text-ink-800',
+                    ].join(' ')}
+                  >
+                    <span className="numeric block text-sm font-semibold">
+                      {formatTime(`${slot.time}:00`)}
+                    </span>
+                    <span className={['numeric block text-[11px]', disabled ? 'text-ink-400' : isSelected ? 'text-brand-50' : 'text-ink-500'].join(' ')}>
+                      {!slot.is_bookable ? (slot.unavailable_reason === 'Fully booked' ? 'full' : 'past') : `${slot.available} free`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="hidden grid-cols-4 gap-2 sm:grid lg:grid-cols-6">
               {availability.slots.map((slot) => {
                 const isSelected = selected === slot.time;
                 const disabled = !slot.is_bookable;
@@ -151,11 +183,7 @@ export function SlotPicker({
                     <span
                       className={[
                         'numeric block text-[11px]',
-                        disabled
-                          ? 'text-ink-400'
-                          : isSelected
-                            ? 'text-brand-50'
-                            : 'text-ink-500',
+                        disabled ? 'text-ink-400' : isSelected ? 'text-brand-50' : 'text-ink-500',
                       ].join(' ')}
                     >
                       {!slot.is_bookable

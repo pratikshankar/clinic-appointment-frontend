@@ -1,21 +1,34 @@
 /**
  * View / download / send for a generated document (Section 19).
  *
- * The same three actions apply to an invoice, a receipt and a treatment
- * statement, so they live in one component rather than being retyped in three
- * places with three slightly different sets of bugs.
+ * Mobile (< 640 px): the send dialog slides up as a BottomSheet.
+ * Desktop (≥ 640 px): the same content appears in a centred Modal.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Icon } from '../Icon';
-import { Alert, Button, Field, Input, Modal, Select } from '../ui';
+import { Alert, BottomSheet, Button, Field, Input, Modal, Select } from '../ui';
 import { openBlob, saveBlob } from '../../services';
 
 const CHANNELS = [
   { value: 'WHATSAPP', label: 'WhatsApp' },
   { value: 'EMAIL', label: 'Email' },
 ];
+
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < breakpoint,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    setIsMobile(mq.matches);
+    return () => mq.removeEventListener('change', handler);
+  }, [breakpoint]);
+  return isMobile;
+}
 
 /**
  * @param fetchPdf  () => Promise<{blob, filename}>
@@ -30,6 +43,7 @@ export function DocumentActions({
   size = 'sm',
   onSent,
 }) {
+  const isMobile = useIsMobile();
   const [busy, setBusy] = useState(null);
   const [sending, setSending] = useState(false);
   const [open, setOpen] = useState(false);
@@ -55,13 +69,8 @@ export function DocumentActions({
     setError(null);
     setResult(null);
     try {
-      const delivery = await send({
-        channel,
-        recipient: recipient.trim() || null,
-      });
+      const delivery = await send({ channel, recipient: recipient.trim() || null });
       setResult(delivery);
-      // A provider failure comes back as a 200 with status FAILED, so success
-      // here is not the same thing as the message having gone out.
       if (delivery.status === 'SENT') onSent?.(delivery);
     } catch (err) {
       setError(err.message);
@@ -69,6 +78,67 @@ export function DocumentActions({
       setSending(false);
     }
   }
+
+  function openSend() {
+    setResult(null);
+    setError(null);
+    setOpen(true);
+  }
+
+  const sendBody = (
+    <div className="space-y-4">
+      {error && <Alert tone="error">{error}</Alert>}
+
+      {result && (
+        <Alert tone={result.status === 'SENT' ? 'success' : 'error'}>
+          {result.status === 'SENT' ? (
+            <>
+              <strong>{result.filename}</strong> sent to {result.recipient} by{' '}
+              {result.channel.toLowerCase()}.
+            </>
+          ) : (
+            <>
+              Could not send to {result.recipient}
+              {result.error_message ? `: ${result.error_message}` : '.'} The document itself
+              is fine — try the other channel, or download and send it yourself.
+            </>
+          )}
+        </Alert>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Channel" htmlFor="da_channel" required>
+          <Select
+            id="da_channel"
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+          >
+            {CHANNELS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label={channel === 'EMAIL' ? 'Email address' : 'WhatsApp number'}
+          htmlFor="da_recipient"
+          hint={
+            patientName
+              ? `Leave blank to use ${patientName}'s saved contact`
+              : 'Leave blank to use the saved contact'
+          }
+        >
+          <Input
+            id="da_recipient"
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+            placeholder="Optional override"
+          />
+        </Field>
+      </div>
+    </div>
+  );
+
+  const sendLabel = `Send ${CHANNELS.find((c) => c.value === channel)?.label}`;
 
   return (
     <>
@@ -99,11 +169,7 @@ export function DocumentActions({
             variant="ghost"
             aria-label={`Send the ${label.toLowerCase()}`}
             title="Send by WhatsApp or email"
-            onClick={() => {
-              setResult(null);
-              setError(null);
-              setOpen(true);
-            }}
+            onClick={openSend}
           >
             <Icon name="bell" className="size-4" />
           </Button>
@@ -111,86 +177,40 @@ export function DocumentActions({
       </div>
 
       {error && !open && (
-        <p className="mt-1 text-xs text-red-600" role="alert">
-          {error}
-        </p>
+        <p className="mt-1 text-xs text-red-600" role="alert">{error}</p>
       )}
 
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title={`Send ${label.toLowerCase()}`}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Close
-            </Button>
-            <Button loading={sending} onClick={submitSend}>
-              Send {CHANNELS.find((c) => c.value === channel)?.label}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          {error && <Alert tone="error">{error}</Alert>}
-
-          {result && (
-            <Alert tone={result.status === 'SENT' ? 'success' : 'error'}>
-              {result.status === 'SENT' ? (
-                <>
-                  <strong>{result.filename}</strong> sent to {result.recipient} by{' '}
-                  {result.channel.toLowerCase()}.
-                </>
-              ) : (
-                <>
-                  Could not send to {result.recipient}
-                  {result.error_message ? `: ${result.error_message}` : '.'} The document
-                  itself is fine — try the other channel, or download and send it
-                  yourself.
-                </>
-              )}
-            </Alert>
-          )}
-
-          <Alert tone="info">
-            Provider integrations are mocked in this build, so the PDF is generated and
-            the attempt is logged, but nothing reaches a real phone or inbox yet.
-          </Alert>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Channel" htmlFor="send_channel" required>
-              <Select
-                id="send_channel"
-                value={channel}
-                onChange={(event) => setChannel(event.target.value)}
-              >
-                {CHANNELS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
-            <Field
-              label={channel === 'EMAIL' ? 'Email address' : 'WhatsApp number'}
-              htmlFor="send_recipient"
-              hint={
-                patientName
-                  ? `Leave blank to use ${patientName}'s saved contact`
-                  : 'Leave blank to use the saved contact'
-              }
-            >
-              <Input
-                id="send_recipient"
-                value={recipient}
-                onChange={(event) => setRecipient(event.target.value)}
-                placeholder="Optional override"
-              />
-            </Field>
+      {/* Mobile: bottom sheet */}
+      {isMobile ? (
+        <BottomSheet open={open} onClose={() => setOpen(false)} title={`Send ${label.toLowerCase()}`}>
+          <div className="space-y-4 pb-2">
+            {sendBody}
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => setOpen(false)}>
+                Close
+              </Button>
+              <Button loading={sending} className="flex-1" onClick={submitSend}>
+                {sendLabel}
+              </Button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </BottomSheet>
+      ) : (
+        /* Desktop: centred modal */
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title={`Send ${label.toLowerCase()}`}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setOpen(false)}>Close</Button>
+              <Button loading={sending} onClick={submitSend}>{sendLabel}</Button>
+            </>
+          }
+        >
+          {sendBody}
+        </Modal>
+      )}
     </>
   );
 }

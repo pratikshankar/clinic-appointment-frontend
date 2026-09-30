@@ -33,6 +33,13 @@ import Notifications from './pages/Notifications';
 import Billing from './pages/Billing';
 import Reports from './pages/Reports';
 import AuditLog from './pages/AuditLog';
+import RefundList from './pages/refunds/RefundList';
+import RefundRequest from './pages/refunds/RefundRequest';
+import RefundDetail from './pages/refunds/RefundDetail';
+import ReferralList from './pages/referrals/ReferralList';
+import ReferralForm from './pages/referrals/ReferralForm';
+import ReferralDetail from './pages/referrals/ReferralDetail';
+import TodayActivity from './pages/TodayActivity';
 import { NotFound } from './pages/NotFound';
 
 /** Sends a signed-in user to their own dashboard. */
@@ -71,6 +78,7 @@ export default function App() {
             <Route path="/superadmin/patients/new" element={<PatientForm />} />
             <Route path="/superadmin/patients/:patientId" element={<PatientProfile />} />
             <Route path="/superadmin/patients/:patientId/edit" element={<PatientForm />} />
+            <Route path="/superadmin/today" element={<TodayActivity />} />
             <Route path="/superadmin/appointments" element={<AppointmentList />} />
             <Route path="/superadmin/appointments/new" element={<BookAppointment />} />
             <Route path="/superadmin/sessions" element={<SessionList />} />
@@ -79,6 +87,12 @@ export default function App() {
             <Route path="/superadmin/billing" element={<Billing />} />
             <Route path="/superadmin/audit" element={<AuditLog />} />
             <Route path="/superadmin/reports" element={<Reports />} />
+            <Route path="/superadmin/refunds" element={<RefundList />} />
+            <Route path="/superadmin/refunds/new" element={<RefundRequest />} />
+            <Route path="/superadmin/refunds/:refundId" element={<RefundDetail />} />
+            <Route path="/superadmin/referrals" element={<ReferralList />} />
+            <Route path="/superadmin/referrals/new" element={<ReferralForm />} />
+            <Route path="/superadmin/referrals/:referralId" element={<ReferralDetail />} />
           </Route>
 
           {/* --- Admin --- */}
@@ -86,6 +100,7 @@ export default function App() {
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
             <Route path="/admin/clinics" element={<Clinics />} />
             <Route path="/admin/clinics/:clinicId" element={<ClinicDetail />} />
+            <Route path="/admin/today" element={<TodayActivity />} />
             <Route path="/admin/appointments" element={<AppointmentList />} />
             <Route path="/admin/appointments/new" element={<BookAppointment />} />
             <Route path="/admin/sessions" element={<SessionList />} />
@@ -95,7 +110,14 @@ export default function App() {
             <Route path="/admin/patients/:patientId/edit" element={<PatientForm />} />
             <Route path="/admin/notifications" element={<Notifications />} />
             <Route path="/admin/billing" element={<Billing />} />
+            <Route path="/admin/audit" element={<AuditLog />} />
             <Route path="/admin/reports" element={<Reports />} />
+            <Route path="/admin/refunds" element={<RefundList />} />
+            <Route path="/admin/refunds/new" element={<RefundRequest />} />
+            <Route path="/admin/refunds/:refundId" element={<RefundDetail />} />
+            <Route path="/admin/referrals" element={<ReferralList />} />
+            <Route path="/admin/referrals/new" element={<ReferralForm />} />
+            <Route path="/admin/referrals/:referralId" element={<ReferralDetail />} />
           </Route>
 
           {/* --- Clinic User --- */}
@@ -110,7 +132,13 @@ export default function App() {
             <Route path="/clinic/sessions" element={<SessionList />} />
             <Route path="/clinic/notifications" element={<Notifications />} />
             <Route path="/clinic/billing" element={<Billing />} />
-            <Route path="/clinic/reports" element={<Reports />} />
+
+            <Route path="/clinic/refunds" element={<RefundList />} />
+            <Route path="/clinic/refunds/new" element={<RefundRequest />} />
+            <Route path="/clinic/refunds/:refundId" element={<RefundDetail />} />
+            <Route path="/clinic/referrals" element={<ReferralList />} />
+            <Route path="/clinic/referrals/new" element={<ReferralForm />} />
+            <Route path="/clinic/referrals/:referralId" element={<ReferralDetail />} />
           </Route>
         </Route>
       </Route>

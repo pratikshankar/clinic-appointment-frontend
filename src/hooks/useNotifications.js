@@ -43,6 +43,9 @@ const EMPTY = {
   alarmActive: false,
   //: 'unsupported' | 'default' | 'granted' | 'denied'
   desktopPermission: 'unsupported',
+  pushSupported: false,
+  pushEnabled: false,
+  pushLoading: false,
 };
 
 let state = {
@@ -50,6 +53,10 @@ let state = {
   soundEnabled: window.localStorage.getItem(SOUND_PREF_KEY) !== 'off',
   desktopPermission:
     typeof window.Notification === 'undefined' ? 'unsupported' : Notification.permission,
+  pushSupported:
+    typeof window !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window,
 };
 
 const listeners = new Set();
@@ -331,7 +338,40 @@ function stopPolling() {
   stopAlarm();
 }
 
-function subscribe(listener) {
+/* -------------------------------------------------------------------------- *
+ * Web Push subscription helpers
+ *
+ * Converting the VAPID public key from base64url to the Uint8Array that
+ * PushManager.subscribe() requires.
+ * -------------------------------------------------------------------------- */
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+async function getActivePushSub() {
+  if (!state.pushSupported) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    return await reg.pushManager.getSubscription();
+  } catch {
+    return null;
+  }
+}
+
+function subToPayload(sub) {
+  const json = sub.toJSON();
+  return {
+    endpoint: json.endpoint,
+    p256dh: json.keys.p256dh,
+    auth: json.keys.auth,
+  };
+}
+
+function storeSubscribe(listener) {
   listeners.add(listener);
   if (listeners.size === 1) startPolling();
   return () => {
@@ -346,7 +386,7 @@ const getSnapshot = () => state;
 export function useNotifications({ enabled = true } = {}) {
   // Non-clinic roles never subscribe, so no poller runs for them at all.
   const subscribeIfEnabled = useCallback(
-    (listener) => (enabled ? subscribe(listener) : noopSubscribe()),
+    (listener) => (enabled ? storeSubscribe(listener) : noopSubscribe()),
     [enabled],
   );
   const snapshot = useSyncExternalStore(subscribeIfEnabled, getSnapshot, getSnapshot);
@@ -403,6 +443,67 @@ export function useNotifications({ enabled = true } = {}) {
     }
   }, []);
 
+  /** Check whether push is already active on this device and sync state. */
+  const checkPushStatus = useCallback(async () => {
+    if (!state.pushSupported) return;
+    const sub = await getActivePushSub();
+    emit({ pushEnabled: Boolean(sub) });
+  }, []);
+
+  /**
+   * Subscribe this device to Web Push. Requests notification permission if
+   * needed, fetches the VAPID public key, and registers with the backend.
+   * Returns 'granted', 'denied', or 'not_configured'.
+   */
+  const enablePush = useCallback(async () => {
+    if (!state.pushSupported) return 'unsupported';
+
+    if (Notification.permission !== 'granted') {
+      const perm = await Notification.requestPermission();
+      emit({ desktopPermission: perm });
+      if (perm !== 'granted') return 'denied';
+    }
+
+    emit({ pushLoading: true });
+    try {
+      const { pushService } = await import('../services');
+      const { public_key, enabled } = await pushService.vapidKey();
+      if (!enabled) {
+        emit({ pushLoading: false });
+        return 'not_configured';
+      }
+
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(public_key),
+      });
+
+      await pushService.subscribe(subToPayload(sub));
+      emit({ pushEnabled: true, pushLoading: false });
+      return 'granted';
+    } catch (err) {
+      emit({ pushLoading: false });
+      throw err;
+    }
+  }, []);
+
+  /** Unsubscribe this device and remove the registration from the backend. */
+  const disablePush = useCallback(async () => {
+    emit({ pushLoading: true });
+    try {
+      const sub = await getActivePushSub();
+      if (sub) {
+        const { pushService } = await import('../services');
+        await pushService.unsubscribe(subToPayload(sub)).catch(() => {});
+        await sub.unsubscribe();
+      }
+      emit({ pushEnabled: false, pushLoading: false });
+    } catch {
+      emit({ pushLoading: false });
+    }
+  }, []);
+
   return {
     counters: snapshot,
     unread: snapshot.unacknowledged,
@@ -412,10 +513,16 @@ export function useNotifications({ enabled = true } = {}) {
     soundBlocked: snapshot.soundBlocked,
     alarmActive: snapshot.alarmActive,
     desktopPermission: snapshot.desktopPermission,
+    pushSupported: snapshot.pushSupported,
+    pushEnabled: snapshot.pushEnabled,
+    pushLoading: snapshot.pushLoading,
     setSound,
     unlockSound,
     silence,
     enableDesktop,
+    enablePush,
+    disablePush,
+    checkPushStatus,
     refresh: poll,
   };
 }

@@ -26,6 +26,7 @@ import {
   PageHeader,
   Select,
   Spinner,
+  StepIndicator,
 } from '../../components/ui';
 import { useAuth } from '../../context/AuthContext';
 import { useApi } from '../../hooks/useApi';
@@ -113,11 +114,14 @@ export default function BookAppointment() {
 
   const whatsappSameAsMobile = !lead.whatsapp_number.trim();
 
-  const readyToBook =
-    Boolean(effectiveClinicId && onDate && slot) &&
-    (mode === 'existing'
+  const patientReady =
+    mode === 'existing'
       ? Boolean(patient)
-      : lead.full_name.trim().length >= 2 && lead.mobile.replace(/\D/g, '').length >= 10);
+      : lead.full_name.trim().length >= 2 && lead.mobile.replace(/\D/g, '').length >= 10;
+
+  const readyToBook = Boolean(effectiveClinicId && onDate && slot) && patientReady;
+
+  const bookingStep = slot ? 2 : patientReady ? 1 : 0;
 
   async function submit(event) {
     event.preventDefault();
@@ -183,6 +187,8 @@ export default function BookAppointment() {
         backLabel="All appointments"
         description="A first-time caller is registered and booked in one step. An existing patient keeps their Patient ID."
       />
+
+      <StepIndicator steps={['Patient', 'Slot', 'Confirm']} current={bookingStep} />
 
       <form onSubmit={submit} className="max-w-4xl space-y-4">
         {error && (

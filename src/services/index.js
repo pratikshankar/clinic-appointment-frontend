@@ -101,6 +101,10 @@ export const sessionService = {
   createPackage: (patientId, payload) => api.post(`/patients/${patientId}/packages`, payload),
   updatePackage: (packageId, payload) => api.put(`/packages/${packageId}`, payload),
   cancelPackage: (packageId, reason) => api.post(`/packages/${packageId}/cancel`, { reason }),
+  redeemReferralCredit: (packageId, sessions) =>
+    api.post(`/packages/${packageId}/apply-referral-credit`, { sessions }),
+  redeemReferredCredit: (packageId, sessions) =>
+    api.post(`/packages/${packageId}/apply-referred-credit`, { sessions }),
 };
 
 export const notificationService = {
@@ -119,11 +123,14 @@ export const billingService = {
 
   list: (params) => api.get('/bills', params),
   counters: (clinicId) => api.get('/bills/counters', { clinic_id: clinicId }),
+  paymentBreakdown: (params) => api.get('/bills/payment-breakdown', params),
   get: (billId) => api.get(`/bills/${billId}`),
   forPatient: (patientId) => api.get(`/patients/${patientId}/bills`),
   /** A charge outside a package: consultation, add-on therapy, product. */
   charge: (patientId, payload) => api.post(`/patients/${patientId}/bills`, payload),
+  updateBill: (billId, payload) => api.put(`/bills/${billId}`, payload),
   addPayment: (billId, payload) => api.post(`/bills/${billId}/payments`, payload),
+  updatePayment: (paymentId, payload) => api.put(`/payments/${paymentId}`, payload),
 
   // --- Documents (Phase 7b) ---
   /** Invoice for a whole bill: every charge, and what is still owed. */
@@ -192,6 +199,53 @@ export const dashboardService = {
 export const metaService = {
   health: () => api.get('/health'),
   meta: () => api.get('/meta'),
+};
+
+export const referralService = {
+  list: (params) => api.get('/referrals', params),
+  get: (id) => api.get(`/referrals/${id}`),
+  create: (payload) => api.post('/referrals', payload),
+  applyCredit: (id, payload) => api.post(`/referrals/${id}/credit`, payload),
+};
+
+export const refundService = {
+  prefill: (packageId) => api.get(`/refunds/prefill/${packageId}`),
+  list: (params) => api.get('/refunds', params),
+  get: (refundId) => api.get(`/refunds/${refundId}`),
+  initiate: (payload) => api.post('/refunds', payload),
+  updateCalculation: (refundId, payload) => api.put(`/refunds/${refundId}/calculation`, payload),
+  review: (refundId, payload) => api.post(`/refunds/${refundId}/review`, payload),
+  complete: (refundId, payload) => api.post(`/refunds/${refundId}/complete`, payload),
+
+  uploadAttachment: async (refundId, file, attachmentType) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('attachment_type', attachmentType);
+    const url = new URL(`${api.baseUrl}/refunds/${refundId}/attachments`, window.location.origin);
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenStore.access}` },
+      body: formData,
+    });
+    if (!resp.ok) {
+      const payload = await resp.json().catch(() => ({}));
+      const env = payload?.error ?? {};
+      throw Object.assign(new Error(env.message ?? `Upload failed (${resp.status})`), {
+        status: resp.status,
+        code: env.code ?? 'upload_error',
+      });
+    }
+    return resp.json();
+  },
+
+  downloadAttachment: (refundId, attachmentId) =>
+    api.blob(`/refunds/${refundId}/attachments/${attachmentId}`),
+};
+
+export const pushService = {
+  vapidKey: () => api.get('/push/vapid-public-key'),
+  subscribe: (payload) => api.post('/push/subscribe', payload),
+  unsubscribe: (payload) => api.post('/push/unsubscribe', payload),
 };
 
 export { api, tokenStore, saveBlob, openBlob };

@@ -41,6 +41,7 @@ const BLANK = {
   source_id: '',
   source_detail: '',
   primary_clinic_id: '',
+  referred_by_code: '',
 };
 
 const GENDERS = ['MALE', 'FEMALE', 'OTHER', 'UNDISCLOSED'];
@@ -151,6 +152,9 @@ export default function PatientForm() {
       source_detail: form.source_detail.trim() || null,
       primary_clinic_id: form.primary_clinic_id ? Number(form.primary_clinic_id) : null,
     };
+    if (!isEdit && form.referred_by_code.trim()) {
+      body.referred_by_code = form.referred_by_code.trim().toUpperCase();
+    }
     return body;
   }
 
@@ -437,6 +441,24 @@ export default function PatientForm() {
                 onChange={update('source_detail')}
               />
             </Field>
+
+            {!isEdit && (
+              <div className="sm:col-span-2">
+                <Field
+                  label="Referred by (code)"
+                  htmlFor="referred_by_code"
+                  hint="e.g. REF-PT-000042 — leave blank if not referred by an existing patient"
+                >
+                  <Input
+                    id="referred_by_code"
+                    value={form.referred_by_code}
+                    onChange={update('referred_by_code')}
+                    placeholder="REF-PT-…"
+                    maxLength={30}
+                  />
+                </Field>
+              </div>
+            )}
           </div>
         </Card>
 

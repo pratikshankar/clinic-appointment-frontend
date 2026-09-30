@@ -23,9 +23,9 @@ const BUTTON_VARIANTS = {
 };
 
 const BUTTON_SIZES = {
-  sm: 'px-2.5 py-1.5 text-xs',
-  md: 'px-3.5 py-2 text-sm',
-  lg: 'px-4 py-2.5 text-sm',
+  sm: 'px-2.5 py-1.5 text-xs min-h-[44px] sm:min-h-0',
+  md: 'px-3.5 py-2 text-sm min-h-[44px] sm:min-h-0',
+  lg: 'px-4 py-2.5 text-sm min-h-[44px] sm:min-h-0',
 };
 
 export function Button({
@@ -214,8 +214,9 @@ export function Field({ label, htmlFor, error, hint, required, children }) {
   );
 }
 
+// min-h-[44px] meets Apple HIG touch-target guidance on mobile.
 const CONTROL_CLASS =
-  'block w-full rounded-lg bg-white px-3 py-2 text-sm text-ink-900 ring-1 ring-inset ' +
+  'block w-full min-h-[44px] rounded-lg bg-white px-3 py-2 text-sm text-ink-900 ring-1 ring-inset ' +
   'ring-ink-300 placeholder:text-ink-400 focus:ring-2 focus:ring-inset focus:ring-brand-600 ' +
   'disabled:bg-ink-50 disabled:text-ink-500';
 
@@ -291,6 +292,87 @@ export function EmptyState({ title, description, action, icon = '—' }) {
       <p className="mt-3 text-sm font-medium text-ink-800">{title}</p>
       {description && <p className="mx-auto mt-1 max-w-md text-sm text-ink-500">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+/* ------------------------------- BottomSheet ---------------------------- */
+/**
+ * Slide-up panel anchored to the bottom of the screen.
+ * Used for filter/sort on mobile and document-send channel selection.
+ */
+export function BottomSheet({ open, onClose, title, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <div
+        className="absolute inset-0 bg-ink-950/40"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="relative w-full rounded-t-2xl bg-white pb-safe">
+        <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-ink-300" />
+        {title && (
+          <div className="flex items-center justify-between px-5 pb-3 pt-4">
+            <h3 className="text-sm font-semibold text-ink-900">{title}</h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-xl leading-none text-ink-400 hover:text-ink-700"
+              aria-label="Close"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+        <div className="max-h-[75vh] overflow-y-auto px-5 pb-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- StepIndicator ---------------------------- */
+export function StepIndicator({ steps, current }) {
+  return (
+    <div className="mb-6 flex items-center gap-0">
+      {steps.map((step, index) => {
+        const done = index < current;
+        const active = index === current;
+        return (
+          <div key={step} className="flex flex-1 items-center">
+            <div className="flex flex-col items-center">
+              <div
+                className={cx(
+                  'grid size-7 place-items-center rounded-full text-xs font-semibold',
+                  done
+                    ? 'bg-brand-600 text-white'
+                    : active
+                      ? 'bg-brand-600 text-white ring-2 ring-brand-200 ring-offset-2'
+                      : 'bg-ink-100 text-ink-500'
+                )}
+              >
+                {done ? '✓' : index + 1}
+              </div>
+              <span
+                className={cx(
+                  'mt-1 whitespace-nowrap text-[10px] font-medium',
+                  active ? 'text-brand-700' : done ? 'text-ink-600' : 'text-ink-400'
+                )}
+              >
+                {step}
+              </span>
+            </div>
+            {index < steps.length - 1 && (
+              <div
+                className={cx(
+                  'mb-4 h-px flex-1',
+                  done ? 'bg-brand-400' : 'bg-ink-200'
+                )}
+              />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

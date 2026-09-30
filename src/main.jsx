@@ -7,10 +7,29 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider } from './context/AuthContext';
 import './index.css';
 
+// Prevent the scroll wheel from accidentally changing number input values.
+// Blurring on wheel lets the scroll event propagate to the page normally.
+document.addEventListener('wheel', () => {
+  if (document.activeElement?.type === 'number') {
+    document.activeElement.blur();
+  }
+}, { passive: true });
+
 // When the app is served from a sub-path (e.g. https://host/absproxy/5173/),
 // the router must know about that prefix or no route matches. Vite sets
 // BASE_URL from the `base` config option.
 const rawBase = import.meta.env.BASE_URL ?? '/';
+
+// Register the Service Worker for Web Push. Silent no-op when unsupported or
+// when VAPID keys are not configured — the rest of the app is unaffected.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    const swPath = rawBase.replace(/\/$/, '') + '/sw.js';
+    navigator.serviceWorker.register(swPath).catch(() => {
+      // SW registration failed — push notifications unavailable.
+    });
+  });
+}
 const basename = rawBase.replace(/\/$/, '') || '/';
 
 /**

@@ -595,13 +595,13 @@ export function SessionForm({
               </div>
             )}
 
-            <Field label="Therapist" htmlFor="therapist_user_id" hint="Defaults to you">
+            <Field label="Therapist" htmlFor="therapist_user_id" hint="Optional — leave blank if unknown">
               <Select
                 id="therapist_user_id"
                 value={form.therapist_user_id}
                 onChange={update('therapist_user_id')}
               >
-                <option value="">You</option>
+                <option value="">— Select therapist —</option>
                 {(context?.therapists ?? []).map((person) => (
                   <option key={person.id} value={person.id}>
                     {person.full_name}

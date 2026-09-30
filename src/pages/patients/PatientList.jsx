@@ -14,6 +14,7 @@ import { Icon } from '../../components/Icon';
 import {
   Alert,
   Badge,
+  BottomSheet,
   Button,
   Card,
   EmptyState,
@@ -49,6 +50,7 @@ export default function PatientList() {
   const [chainResults, setChainResults] = useState(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState(null);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const { data: page, loading, error } = useApi(
     () =>
@@ -121,7 +123,68 @@ export default function PatientList() {
         }
       />
 
-      <Card className="mb-4 p-4">
+      {/* Mobile: search + filter button */}
+      <div className="mb-4 sm:hidden">
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <Input
+              value={filters.search}
+              onChange={update('search')}
+              placeholder="Name, mobile or PT-ID…"
+            />
+          </div>
+          <Button variant="secondary" onClick={() => setFilterOpen(true)}>
+            <Icon name="sliders" className="size-4" />
+            Filter
+          </Button>
+        </div>
+        <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter patients">
+          <div className="space-y-4 py-2">
+            {role !== 'CLINIC_USER' && (
+              <Field label="Clinic" htmlFor="patient-clinic-m">
+                <Select id="patient-clinic-m" value={filters.clinic_id} onChange={update('clinic_id')}>
+                  <option value="">All clinics</option>
+                  {(clinics ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            <Field label="Source" htmlFor="patient-source-m">
+              <Select id="patient-source-m" value={filters.source_id} onChange={update('source_id')}>
+                <option value="">All sources</option>
+                {(sources ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Profile" htmlFor="patient-complete-m">
+              <Select id="patient-complete-m" value={filters.profile_complete} onChange={update('profile_complete')}>
+                <option value="">All profiles</option>
+                <option value="false">Incomplete only</option>
+                <option value="true">Complete only</option>
+              </Select>
+            </Field>
+            <Field label="Package" htmlFor="patient-package-m">
+              <Select id="patient-package-m" value={filters.has_active_package} onChange={update('has_active_package')}>
+                <option value="">Any</option>
+                <option value="false">No active package</option>
+                <option value="true">Has active package</option>
+              </Select>
+            </Field>
+            <Field label="Status" htmlFor="patient-active-m">
+              <Select id="patient-active-m" value={filters.is_active} onChange={update('is_active')}>
+                <option value="true">Active</option>
+                <option value="false">Archived</option>
+              </Select>
+            </Field>
+            <Button className="w-full" onClick={() => setFilterOpen(false)}>Apply</Button>
+          </div>
+        </BottomSheet>
+      </div>
+
+      {/* Desktop filter card */}
+      <Card className="mb-4 hidden p-4 sm:block">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Search" htmlFor="patient-search" hint="Name, mobile or Patient ID">
             <Input
@@ -283,53 +346,91 @@ export default function PatientList() {
           />
         ) : (
           <>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Patient</Th>
-                  <Th>Mobile</Th>
-                  <Th>Clinic</Th>
-                  <Th>Source</Th>
-                  <Th>Registered</Th>
-                  <Th align="right">Profile</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-100">
-                {patients.map((patient) => (
-                  <tr key={patient.id} className="hover:bg-ink-50/60">
-                    <Td>
-                      <Link
-                        to={`${basePath}/patients/${patient.id}`}
-                        className="font-medium text-brand-700 hover:underline"
-                      >
-                        {patient.full_name}
-                      </Link>
-                      <div className="numeric text-xs text-ink-500">
-                        {patient.patient_code}
-                        {patient.age ? ` · ${patient.age}y` : ''}
-                        {patient.gender ? ` · ${patient.gender.toLowerCase()}` : ''}
-                      </div>
-                    </Td>
-                    <Td className="numeric">{patient.mobile}</Td>
-                    <Td>{patient.primary_clinic_name ?? '—'}</Td>
-                    <Td>{patient.source_name ?? '—'}</Td>
-                    <Td>{formatDate(patient.registration_date)}</Td>
-                    <Td align="right">
-                      <div className="flex flex-wrap justify-end gap-1">
-                        {patient.is_profile_complete ? (
-                          <Badge tone="success">Complete</Badge>
-                        ) : (
-                          <Badge tone="warning">Incomplete</Badge>
-                        )}
-                        {patient.has_active_package === false && (
-                          <Badge tone="neutral">No package</Badge>
-                        )}
-                      </div>
-                    </Td>
+            {/* Mobile card list */}
+            <div className="divide-y divide-ink-100 sm:hidden">
+              {patients.map((patient) => (
+                <div key={patient.id} className="px-4 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <Link
+                      to={`${basePath}/patients/${patient.id}`}
+                      className="font-medium text-brand-700"
+                    >
+                      {patient.full_name}
+                    </Link>
+                    <div className="flex shrink-0 gap-1">
+                      {patient.is_profile_complete ? (
+                        <Badge tone="success">Complete</Badge>
+                      ) : (
+                        <Badge tone="warning">Incomplete</Badge>
+                      )}
+                      {patient.has_active_package === false && (
+                        <Badge tone="neutral">No pkg</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="numeric mt-0.5 text-xs text-ink-500">
+                    {patient.patient_code}
+                    {patient.age ? ` · ${patient.age}y` : ''}
+                    {patient.gender ? ` · ${patient.gender.toLowerCase()}` : ''}
+                  </div>
+                  <div className="mt-0.5 text-xs text-ink-500">
+                    {patient.mobile}
+                    {patient.primary_clinic_name ? ` · ${patient.primary_clinic_name}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden sm:block">
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Patient</Th>
+                    <Th>Mobile</Th>
+                    <Th>Clinic</Th>
+                    <Th>Source</Th>
+                    <Th>Registered</Th>
+                    <Th align="right">Profile</Th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {patients.map((patient) => (
+                    <tr key={patient.id} className="hover:bg-ink-50/60">
+                      <Td>
+                        <Link
+                          to={`${basePath}/patients/${patient.id}`}
+                          className="font-medium text-brand-700 hover:underline"
+                        >
+                          {patient.full_name}
+                        </Link>
+                        <div className="numeric text-xs text-ink-500">
+                          {patient.patient_code}
+                          {patient.age ? ` · ${patient.age}y` : ''}
+                          {patient.gender ? ` · ${patient.gender.toLowerCase()}` : ''}
+                        </div>
+                      </Td>
+                      <Td className="numeric">{patient.mobile}</Td>
+                      <Td>{patient.primary_clinic_name ?? '—'}</Td>
+                      <Td>{patient.source_name ?? '—'}</Td>
+                      <Td>{formatDate(patient.registration_date)}</Td>
+                      <Td align="right">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {patient.is_profile_complete ? (
+                            <Badge tone="success">Complete</Badge>
+                          ) : (
+                            <Badge tone="warning">Incomplete</Badge>
+                          )}
+                          {patient.has_active_package === false && (
+                            <Badge tone="neutral">No package</Badge>
+                          )}
+                        </div>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 px-5 py-2.5 text-xs text-ink-500">
               <span>
                 Showing {patients.length} of {page.total} patient

@@ -1,8 +1,10 @@
 /**
- * Shell for every authenticated page: sidebar, top bar and content outlet.
+ * Shell for every authenticated page: sidebar (desktop), bottom tab bar
+ * (mobile), top bar and content outlet.
  *
- * Desktop-first with a collapsible sidebar on small screens, since reception
- * staff work on a desktop but managers check figures on a phone.
+ * Desktop (lg+): fixed left sidebar, full nav.
+ * Mobile (<lg):  bottom tab bar with 4-5 primary items + "More" tab that
+ *               opens the sidebar as a slide-in drawer.
  */
 
 import { useState } from 'react';
@@ -14,7 +16,7 @@ import { Badge, RoleBadge } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../hooks/useNotifications';
 import { notificationService } from '../services';
-import { navigationFor, homeRouteFor } from '../config/navigation';
+import { navigationFor, homeRouteFor, primaryTabsFor } from '../config/navigation';
 import { initialsOf } from '../utils/format';
 
 function SidebarLink({ item, onNavigate, unread = 0 }) {
@@ -60,14 +62,58 @@ function SidebarLink({ item, onNavigate, unread = 0 }) {
   );
 }
 
+function BottomTabItem({ item, onNavigate, unread = 0, isMore = false, moreOpen = false }) {
+  if (isMore) {
+    return (
+      <button
+        type="button"
+        onClick={onNavigate}
+        className={[
+          'flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors',
+          moreOpen ? 'text-brand-700' : 'text-ink-500',
+        ].join(' ')}
+        aria-label="More navigation"
+      >
+        <Icon name="menu" className="size-5" />
+        <span>More</span>
+      </button>
+    );
+  }
+
+  return (
+    <NavLink
+      to={item.to}
+      onClick={onNavigate}
+      className={({ isActive }) =>
+        [
+          'relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors',
+          isActive ? 'text-brand-700' : 'text-ink-500',
+        ].join(' ')
+      }
+    >
+      <div className="relative">
+        <Icon name={item.icon} className="size-5" />
+        {unread > 0 && (
+          <span className="absolute -right-1 -top-1 grid min-w-[14px] place-items-center rounded-full bg-red-600 px-0.5 text-[9px] font-bold text-white">
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </div>
+      <span>{item.label}</span>
+    </NavLink>
+  );
+}
+
 export default function DashboardLayout() {
   const { user, role, logout, clinics } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const items = navigationFor(role);
-  // Only Clinic Users poll and only they get the badge -- an Admin overseeing
-  // twelve clinics would have a permanently red number that means nothing.
+  const primaryTabs = primaryTabsFor(role);
+  // CLINIC_USER has 5 items that all fit; other roles show a "More" tab.
+  const showMoreTab = role !== 'CLINIC_USER';
+
   const location = useLocation();
   const {
     unread,
@@ -82,7 +128,6 @@ export default function DashboardLayout() {
     refresh,
   } = useNotifications({ enabled: role === 'CLINIC_USER' });
 
-  // Redundant on the notifications page itself, where the full list is on screen.
   const showToast = alertsEnabled && !location.pathname.endsWith('/notifications');
   const clinicLabel =
     role === 'CLINIC_USER'
@@ -96,7 +141,7 @@ export default function DashboardLayout() {
 
   return (
     <div className="min-h-screen lg:flex">
-      {/* Sidebar */}
+      {/* Sidebar — desktop: always visible; mobile: slide-in drawer */}
       <aside
         className={[
           'fixed inset-y-0 left-0 z-40 w-64 shrink-0 border-r border-ink-200 bg-white',
@@ -133,6 +178,7 @@ export default function DashboardLayout() {
         </div>
       </aside>
 
+      {/* Backdrop — mobile only, closes the sidebar drawer */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-ink-950/30 lg:hidden"
@@ -144,6 +190,7 @@ export default function DashboardLayout() {
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-ink-200 bg-white/95 px-4 backdrop-blur sm:px-6">
+          {/* Hamburger — visible on mobile when sidebar drawer is needed via header too */}
           <button
             type="button"
             className="rounded-lg p-2 text-ink-600 hover:bg-ink-100 lg:hidden"
@@ -155,11 +202,6 @@ export default function DashboardLayout() {
 
           <div className="flex-1" />
 
-          {/*
-            The browser blocks audio until the page is interacted with, which is
-            exactly the state a reception screen sits in all morning. Offering
-            the one click that fixes it beats leaving staff to wonder.
-          */}
           {alertsEnabled && soundBlocked && (
             <button
               type="button"
@@ -172,11 +214,6 @@ export default function DashboardLayout() {
             </button>
           )}
 
-          {/*
-            Browsers refuse a permission prompt that is not driven by a click,
-            and Chrome permanently blocks origins that ask on page load -- so it
-            has to be a button, offered once and then gone.
-          */}
           {alertsEnabled && desktopPermission === 'default' && (
             <button
               type="button"
@@ -189,11 +226,6 @@ export default function DashboardLayout() {
             </button>
           )}
 
-          {/*
-            The alarm repeats until something is acknowledged, so there has to be
-            an obvious way to stop it now without turning sound off for good --
-            otherwise the escape hatch people find is muting the tab forever.
-          */}
           {alarmActive && (
             <button
               type="button"
@@ -236,7 +268,8 @@ export default function DashboardLayout() {
           </button>
         </header>
 
-        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        {/* pb-20 on mobile so content is not hidden behind the bottom tab bar */}
+        <main className="flex-1 px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:pb-6">
           <Outlet />
         </main>
 
@@ -255,8 +288,30 @@ export default function DashboardLayout() {
             }}
           />
         )}
-
       </div>
+
+      {/* Bottom tab bar — mobile only */}
+      <nav
+        aria-label="Primary navigation"
+        className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-ink-200 bg-white/95 backdrop-blur lg:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        {primaryTabs.map((tab) => (
+          <BottomTabItem
+            key={tab.to}
+            item={tab}
+            unread={tab.badge === 'notifications' ? unread : 0}
+            onNavigate={() => setSidebarOpen(false)}
+          />
+        ))}
+        {showMoreTab && (
+          <BottomTabItem
+            isMore
+            moreOpen={sidebarOpen}
+            onNavigate={() => setSidebarOpen((open) => !open)}
+          />
+        )}
+      </nav>
     </div>
   );
 }

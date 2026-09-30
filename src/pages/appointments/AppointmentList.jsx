@@ -15,6 +15,7 @@ import { SessionForm } from '../../components/session/SessionForm';
 import {
   Alert,
   Badge,
+  BottomSheet,
   Button,
   Card,
   EmptyState,
@@ -90,6 +91,7 @@ export default function AppointmentList() {
   const [cancelling, setCancelling] = useState(null);
   const [rescheduling, setRescheduling] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   // Completing an appointment opens the session form; "Skip for now"
   // completes it without notes.
   const [completing, setCompleting] = useState(null);
@@ -162,6 +164,29 @@ export default function AppointmentList() {
   }
 
   const appointments = page?.items ?? [];
+
+  // Group appointments by date for the upcoming/past tabs.
+  const groupedByDate = appointments.reduce((acc, appt) => {
+    const d = appt.appointment_date;
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(appt);
+    return acc;
+  }, {});
+  const dateGroups = Object.entries(groupedByDate); // [[date, [appts]], ...]
+
+  function friendlyDate(dateStr) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(dateStr + 'T00:00:00');
+    const diff = Math.round((d - today) / 86400000);
+    const label =
+      diff === 0 ? 'Today' :
+      diff === 1 ? 'Tomorrow' :
+      diff === -1 ? 'Yesterday' :
+      d.toLocaleDateString('en-IN', { weekday: 'long' });
+    const dateLabel = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    return `${label} · ${dateLabel}`;
+  }
 
   return (
     <>
@@ -237,7 +262,69 @@ export default function AppointmentList() {
         ))}
       </div>
 
-      <Card className="mb-4 p-4">
+      {/* Filter — button on mobile, full card on sm+ */}
+      <div className="mb-4 sm:hidden">
+        <div className="flex items-center gap-2">
+          <div className="flex-1">
+            <Input
+              value={filters.search}
+              onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
+              placeholder="Search patient, mobile…"
+            />
+          </div>
+          <Button variant="secondary" onClick={() => setFilterOpen(true)}>
+            <Icon name="sliders" className="size-4" />
+            Filter
+          </Button>
+        </div>
+        <BottomSheet
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          title="Filter appointments"
+        >
+          <div className="space-y-4 py-2">
+            {role !== 'CLINIC_USER' && (
+              <Field label="Clinic" htmlFor="appt-clinic-m">
+                <Select
+                  id="appt-clinic-m"
+                  value={filters.clinic_id}
+                  onChange={(event) =>
+                    setFilters((prev) => ({ ...prev, clinic_id: event.target.value }))
+                  }
+                >
+                  <option value="">All clinics</option>
+                  {(clinics ?? []).map((clinic) => (
+                    <option key={clinic.id} value={clinic.id}>
+                      {clinic.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            <Field label="Status" htmlFor="appt-status-m">
+              <Select
+                id="appt-status-m"
+                value={filters.status}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, status: event.target.value }))
+                }
+              >
+                <option value="">All statuses</option>
+                {Object.keys(STATUS_TONES).map((status) => (
+                  <option key={status} value={status}>
+                    {status.replace('_', ' ')}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button className="w-full" onClick={() => setFilterOpen(false)}>
+              Apply
+            </Button>
+          </div>
+        </BottomSheet>
+      </div>
+
+      <Card className="mb-4 hidden p-4 sm:block">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Search" htmlFor="appt-search" hint="Patient, mobile or reference">
             <Input
@@ -314,84 +401,169 @@ export default function AppointmentList() {
             }
           />
         ) : (
-          <Table>
-            <thead>
-              <tr>
-                <Th>Time</Th>
-                <Th>Patient</Th>
-                <Th>Clinic</Th>
-                <Th>Complaint</Th>
-                <Th>Status</Th>
-                <Th align="right">Actions</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100">
-              {appointments.map((appointment) => (
-                <tr key={appointment.id} className="hover:bg-ink-50/60">
-                  <Td>
-                    <div className="numeric font-medium text-ink-900">
-                      {formatTime(appointment.start_time)}
-                    </div>
-                    <div className="text-xs text-ink-500">
-                      {formatDate(appointment.appointment_date)}
-                    </div>
-                  </Td>
-                  <Td>
-                    <Link
-                      to={`${basePath}/patients/${appointment.patient.id}`}
-                      className="font-medium text-brand-700 hover:underline"
-                    >
-                      {appointment.patient.full_name}
-                    </Link>
-                    <div className="numeric text-xs text-ink-500">
-                      {appointment.patient.patient_code} · {appointment.patient.mobile}
-                    </div>
-                  </Td>
-                  <Td>{appointment.clinic_name}</Td>
-                  <Td className="max-w-[14rem] truncate">
-                    {appointment.chief_complaint ?? '—'}
-                  </Td>
-                  <Td>
-                    <button
-                      type="button"
-                      onClick={() => setHistoryFor(appointment)}
-                      title="View history"
-                    >
-                      <Badge tone={STATUS_TONES[appointment.status] ?? 'neutral'}>
-                        {appointment.status.replace('_', ' ')}
-                      </Badge>
-                    </button>
-                  </Td>
-                  <Td align="right">
-                    <div className="flex flex-wrap justify-end gap-1.5">
-                      {(ACTIONS[appointment.status] ?? []).map((action) => (
-                        <Button
-                          key={action}
-                          size="sm"
-                          variant={
-                            action === 'cancel' || action === 'noShow' ? 'secondary' : 'primary'
-                          }
-                          loading={busyId === appointment.id}
-                          onClick={() => act(appointment, action)}
+          <>
+            {/* Mobile card list — grouped by date */}
+            <div className="sm:hidden">
+              {dateGroups.map(([date, group]) => (
+                <div key={date}>
+                  <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-brand-100 bg-brand-50 px-4 py-2">
+                    <span className="size-2 shrink-0 rounded-full bg-brand-500" />
+                    <span className="text-xs font-semibold tracking-wide text-brand-700">
+                      {friendlyDate(date)}
+                    </span>
+                    <span className="ml-auto text-xs text-brand-500">{group.length} appt{group.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="divide-y divide-ink-100">
+                    {group.map((appointment) => (
+                      <div key={appointment.id} className="px-4 py-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="numeric text-sm font-semibold text-ink-900">
+                            {formatTime(appointment.start_time)}
+                          </div>
+                          <button type="button" onClick={() => setHistoryFor(appointment)}>
+                            <Badge tone={STATUS_TONES[appointment.status] ?? 'neutral'}>
+                              {appointment.status.replace('_', ' ')}
+                            </Badge>
+                          </button>
+                        </div>
+                        <Link
+                          to={`${basePath}/patients/${appointment.patient.id}`}
+                          className="mt-1 block font-medium text-brand-700"
                         >
-                          {ACTION_LABELS[action]}
-                        </Button>
-                      ))}
-                      {(ACTIONS[appointment.status] ?? []).length === 0 && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setHistoryFor(appointment)}
-                        >
-                          History
-                        </Button>
-                      )}
-                    </div>
-                  </Td>
-                </tr>
+                          {appointment.patient.full_name}
+                        </Link>
+                        <div className="numeric text-xs text-ink-500">
+                          {appointment.patient.patient_code} · {appointment.patient.mobile}
+                          {appointment.clinic_name ? ` · ${appointment.clinic_name}` : ''}
+                        </div>
+                        {appointment.chief_complaint && (
+                          <div className="mt-0.5 truncate text-xs text-ink-600">
+                            {appointment.chief_complaint}
+                          </div>
+                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(ACTIONS[appointment.status] ?? []).map((action) => (
+                            <Button
+                              key={action}
+                              size="sm"
+                              variant={
+                                action === 'cancel' || action === 'noShow' ? 'secondary' : 'primary'
+                              }
+                              loading={busyId === appointment.id}
+                              onClick={() => act(appointment, action)}
+                            >
+                              {ACTION_LABELS[action]}
+                            </Button>
+                          ))}
+                          {(ACTIONS[appointment.status] ?? []).length === 0 && (
+                            <Button size="sm" variant="ghost" onClick={() => setHistoryFor(appointment)}>
+                              History
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </Table>
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden sm:block">
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Time</Th>
+                    <Th>Patient</Th>
+                    <Th>Clinic</Th>
+                    <Th>Complaint</Th>
+                    <Th>Status</Th>
+                    <Th align="right">Actions</Th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {dateGroups.map(([date, group]) => (
+                    <>
+                      <tr key={`header-${date}`} className="bg-brand-50">
+                        <td colSpan={6} className="py-2 pl-4 pr-6">
+                          <div className="flex items-center gap-2">
+                            <span className="size-2 rounded-full bg-brand-500" />
+                            <span className="text-xs font-semibold tracking-wide text-brand-700">
+                              {friendlyDate(date)}
+                            </span>
+                            <span className="ml-auto text-xs text-brand-400">
+                              {group.length} appointment{group.length !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {group.map((appointment) => (
+                        <tr key={appointment.id} className="hover:bg-ink-50/60">
+                          <Td>
+                            <div className="numeric font-medium text-ink-900">
+                              {formatTime(appointment.start_time)}
+                            </div>
+                          </Td>
+                          <Td>
+                            <Link
+                              to={`${basePath}/patients/${appointment.patient.id}`}
+                              className="font-medium text-brand-700 hover:underline"
+                            >
+                              {appointment.patient.full_name}
+                            </Link>
+                            <div className="numeric text-xs text-ink-500">
+                              {appointment.patient.patient_code} · {appointment.patient.mobile}
+                            </div>
+                          </Td>
+                          <Td>{appointment.clinic_name}</Td>
+                          <Td className="max-w-[14rem] truncate">
+                            {appointment.chief_complaint ?? '—'}
+                          </Td>
+                          <Td>
+                            <button
+                              type="button"
+                              onClick={() => setHistoryFor(appointment)}
+                              title="View history"
+                            >
+                              <Badge tone={STATUS_TONES[appointment.status] ?? 'neutral'}>
+                                {appointment.status.replace('_', ' ')}
+                              </Badge>
+                            </button>
+                          </Td>
+                          <Td align="right">
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              {(ACTIONS[appointment.status] ?? []).map((action) => (
+                                <Button
+                                  key={action}
+                                  size="sm"
+                                  variant={
+                                    action === 'cancel' || action === 'noShow' ? 'secondary' : 'primary'
+                                  }
+                                  loading={busyId === appointment.id}
+                                  onClick={() => act(appointment, action)}
+                                >
+                                  {ACTION_LABELS[action]}
+                                </Button>
+                              ))}
+                              {(ACTIONS[appointment.status] ?? []).length === 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setHistoryFor(appointment)}
+                                >
+                                  History
+                                </Button>
+                              )}
+                            </div>
+                          </Td>
+                        </tr>
+                      ))}
+                    </>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+          </>
         )}
       </Card>
 

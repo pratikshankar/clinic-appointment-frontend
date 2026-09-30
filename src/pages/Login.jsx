@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import paineasyLogo from '../assets/paineasy-logo.jpg';
 import { Alert, Button, Field, Input } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { homeRouteFor } from '../config/navigation';
@@ -37,22 +38,20 @@ export default function Login() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Brand panel */}
-      <div className="hidden flex-col justify-between bg-brand-800 p-12 text-brand-50 lg:flex">
-        <div className="flex items-center gap-3">
-          <span className="grid size-9 place-items-center rounded-lg bg-white/15 font-bold">
-            C
-          </span>
-          <span className="font-semibold">Clinic Manager</span>
-        </div>
-        <div>
-          <h1 className="text-3xl font-semibold leading-tight">
-            Run every clinic
+      <div className="hidden flex-col items-center justify-center gap-10 bg-brand-800 p-12 text-brand-50 lg:flex">
+        <img
+          src={paineasyLogo}
+          alt="PainEasy"
+          className="w-64 rounded-2xl shadow-xl"
+        />
+        <div className="text-center">
+          <h1 className="text-3xl font-bold leading-tight tracking-tight">
+            Manage every session.
             <br />
-            from one place.
+            Run every clinic.
           </h1>
-          <p className="mt-4 max-w-sm text-sm text-brand-100">
-            Appointments, patients, physiotherapy sessions and billing for your whole chain of
-            clinics.
+          <p className="mt-4 max-w-sm text-sm text-brand-100 leading-relaxed">
+            Think Physiotherapy ! Think us !
           </p>
         </div>
       </div>
@@ -67,7 +66,6 @@ export default function Login() {
           </div>
 
           <h2 className="text-xl font-semibold text-ink-900">Sign in</h2>
-          <p className="mt-1 text-sm text-ink-500">Use the account issued by your Superadmin.</p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
             {error && <Alert tone="error">{error}</Alert>}
@@ -81,7 +79,6 @@ export default function Login() {
                 autoComplete="username"
                 autoFocus
                 required
-                placeholder="superadmin"
               />
             </Field>
 
@@ -103,10 +100,6 @@ export default function Login() {
             </Button>
           </form>
 
-          <p className="mt-6 text-xs text-ink-400">
-            Trouble signing in? Ask your Superadmin to reset your password — accounts are not
-            self-service.
-          </p>
         </div>
       </div>
     </div>

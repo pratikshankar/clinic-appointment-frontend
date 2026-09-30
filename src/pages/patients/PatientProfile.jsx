@@ -10,11 +10,19 @@ import { Fragment, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { Icon } from '../../components/Icon';
+import { BillEditModal } from '../../components/billing/BillEditModal';
 import { ChargeForm } from '../../components/billing/ChargeForm';
 import { DocumentActions } from '../../components/billing/DocumentActions';
+import { PaymentEditModal } from '../../components/billing/PaymentEditModal';
 import { RecordPaymentForm } from '../../components/billing/RecordPaymentForm';
+import { PackageEditModal } from '../../components/session/PackageEditModal';
 import { PackageForm } from '../../components/session/PackageForm';
+import { SessionEditModal } from '../../components/session/SessionEditModal';
 import { SessionForm } from '../../components/session/SessionForm';
+import { PrescriptionForm } from '../../components/prescriptions/PrescriptionForm';
+import { PrescriptionList } from '../../components/prescriptions/PrescriptionList';
+import { prescriptionService } from '../../services/prescriptionService.js';
+import { physioPointsService } from '../../services/physioPointsService.js';
 import {
   Alert,
   Badge,
@@ -52,6 +60,153 @@ const APPOINTMENT_TONES = {
 
 const PAYMENT_TONES = { PAID: 'success', PARTIAL: 'warning', UNPAID: 'danger' };
 
+const TXN_LABELS = {
+  EARNED: { label: 'Earned', color: 'text-emerald-700', sign: '+' },
+  REDEEMED: { label: 'Redeemed', color: 'text-brand-700', sign: '−' },
+  REFUND_REVOKE: { label: 'Refund revoke', color: 'text-red-600', sign: '−' },
+  REFUND_RESTORE: { label: 'Refund restore', color: 'text-emerald-700', sign: '+' },
+  MANUAL_CREDIT: { label: 'Manual credit', color: 'text-emerald-700', sign: '+' },
+  MANUAL_DEBIT: { label: 'Manual debit', color: 'text-red-600', sign: '−' },
+};
+
+function PhysioPointsBanner({ balance, ledger, redeemValue = 0.5, earnPer100 = 10, expiryDays = 365, role, patientId, showLedger, onToggleLedger, adjusting, onAdjust, onAdjustClose }) {
+  const [adjustPts, setAdjustPts] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjBusy, setAdjBusy] = useState(false);
+  const [adjError, setAdjError] = useState(null);
+
+  const isAdmin = role === 'ADMIN' || role === 'SUPERADMIN';
+
+  async function submitAdjust(e) {
+    e.preventDefault();
+    const pts = parseInt(adjustPts, 10);
+    if (!pts || !adjustReason.trim()) return;
+    setAdjBusy(true);
+    setAdjError(null);
+    try {
+      await physioPointsService.adjust(patientId, pts, adjustReason);
+      setAdjustPts('');
+      setAdjustReason('');
+      onAdjustClose();
+    } catch (err) {
+      setAdjError(err.message);
+    } finally {
+      setAdjBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Icon name="star" className="size-5 shrink-0 text-amber-500" />
+          <div>
+            <span className="text-sm font-semibold text-ink-900">
+              {balance} Physio Points
+            </span>
+            <span className="ml-2 text-xs text-ink-500">
+              = ₹{(balance * redeemValue).toFixed(redeemValue % 1 === 0 ? 0 : 2)} discount
+              {' '}· earn {earnPer100} pts / ₹100 · expires in {Math.round(expiryDays / 30)} months
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {isAdmin && (
+            <Button size="sm" variant="secondary" onClick={onAdjust}>Adjust</Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={onToggleLedger}>
+            {showLedger ? 'Hide history' : 'History'}
+          </Button>
+        </div>
+      </div>
+
+      {adjusting && isAdmin && (
+        <form onSubmit={submitAdjust} className="mt-3 border-t border-amber-200 pt-3 space-y-2">
+          <p className="text-xs font-medium text-ink-700">Manual points adjustment</p>
+          <div className="flex gap-2 items-end">
+            <div>
+              <label className="text-xs text-ink-500">Points (+ credit, − debit)</label>
+              <input
+                type="number"
+                className="mt-0.5 block w-28 rounded-md border border-ink-300 px-3 py-1.5 text-sm"
+                placeholder="e.g. 50 or -20"
+                value={adjustPts}
+                onChange={(e) => setAdjustPts(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-ink-500">Reason (required)</label>
+              <input
+                type="text"
+                className="mt-0.5 block w-full rounded-md border border-ink-300 px-3 py-1.5 text-sm"
+                placeholder="e.g. Goodwill gesture for delay"
+                value={adjustReason}
+                onChange={(e) => setAdjustReason(e.target.value)}
+                minLength={5}
+                required
+              />
+            </div>
+            <Button size="sm" type="submit" loading={adjBusy}>Save</Button>
+            <Button size="sm" variant="secondary" type="button" onClick={onAdjustClose}>Cancel</Button>
+          </div>
+          {adjError && <p className="text-xs text-red-600">{adjError}</p>}
+        </form>
+      )}
+
+      {showLedger && (
+        <div className="mt-3 border-t border-amber-200 pt-3">
+          {ledger.length === 0 ? (
+            <p className="text-xs text-ink-500">No points activity yet.</p>
+          ) : (
+            <div className="space-y-1 max-h-52 overflow-y-auto">
+              {ledger.map((e) => {
+                const meta = TXN_LABELS[e.transaction_type] ?? { label: e.transaction_type, color: 'text-ink-700', sign: '' };
+                return (
+                  <div key={e.id} className="flex items-start justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <span className={`font-medium ${meta.color}`}>{meta.label}</span>
+                      <span className="ml-2 text-ink-500 truncate">{e.description}</span>
+                    </div>
+                    <span className={`shrink-0 font-mono font-semibold ${meta.color}`}>
+                      {meta.sign}{Math.abs(e.points)} pts
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReferralCodeBanner({ code }) {
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="mb-4 flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm">
+      <Icon name="users" className="size-5 shrink-0 text-brand-600" />
+      <div className="flex-1 min-w-0">
+        <span className="text-ink-600">Referral code </span>
+        <span className="font-mono font-semibold text-ink-900">{code}</span>
+        <span className="ml-2 text-xs text-ink-400">Share with friends — they earn 2 free sessions when they register a 5+ session package</span>
+      </div>
+      <Button size="sm" variant="secondary" onClick={copy}>
+        {copied ? 'Copied!' : 'Copy'}
+      </Button>
+    </div>
+  );
+}
+
 export default function PatientProfile() {
   const { patientId } = useParams();
   const navigate = useNavigate();
@@ -65,7 +220,27 @@ export default function PatientProfile() {
   const [addingCharge, setAddingCharge] = useState(false);
   const [payingBill, setPayingBill] = useState(null);
   const [openBillId, setOpenBillId] = useState(null);
+  const [redeemingPackageId, setRedeemingPackageId] = useState(null);
+  const [redeemingReferredPackageId, setRedeemingReferredPackageId] = useState(null);
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [editingSession, setEditingSession] = useState(null);
+  const [editingBill, setEditingBill] = useState(null);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [editingPackage, setEditingPackage] = useState(null);
+  const [addingPrescription, setAddingPrescription] = useState(false);
+  const [showPointsLedger, setShowPointsLedger] = useState(false);
+  const [adjustingPoints, setAdjustingPoints] = useState(false);
   const { data: clinics } = useApi(() => clinicService.list({ status: 'ACTIVE' }), []);
+  const {
+    data: pointsData,
+    reload: reloadPoints,
+  } = useApi(() => physioPointsService.get(patientId), [patientId]);
+  const {
+    data: prescriptions,
+    loading: prescriptionsLoading,
+    reload: reloadPrescriptions,
+  } = useApi(() => prescriptionService.list(patientId), [patientId]);
+  const { data: sessionCtx } = useApi(() => sessionService.context(patientId), [patientId]);
 
   const { data, loading, error, reload } = useApi(
     () => patientService.profile(patientId),
@@ -83,6 +258,34 @@ export default function PatientProfile() {
 
   async function reloadAll() {
     await Promise.all([reload(), reloadBills()]);
+  }
+
+  async function handleRedeemCredit(packageId) {
+    setRedeemBusy(true);
+    try {
+      await sessionService.redeemReferralCredit(packageId, 2);
+      setRedeemingPackageId(null);
+      await reload();
+      setBanner({ tone: 'success', message: '2 referrer credit sessions redeemed onto the package.' });
+    } catch (err) {
+      setBanner({ tone: 'error', message: err.message });
+    } finally {
+      setRedeemBusy(false);
+    }
+  }
+
+  async function handleRedeemReferredCredit(packageId) {
+    setRedeemBusy(true);
+    try {
+      await sessionService.redeemReferredCredit(packageId, 2);
+      setRedeemingReferredPackageId(null);
+      await reload();
+      setBanner({ tone: 'success', message: '2 referred-patient credit sessions redeemed onto the package.' });
+    } catch (err) {
+      setBanner({ tone: 'error', message: err.message });
+    } finally {
+      setRedeemBusy(false);
+    }
   }
 
   async function toggleArchive() {
@@ -162,6 +365,13 @@ export default function PatientProfile() {
                 </Button>
               </>
             )}
+            <Link
+              to={`${basePath}/referrals/new?referred_patient_id=${patient.id}`}
+              className="inline-flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-sm font-medium text-ink-800 ring-1 ring-inset ring-ink-300 hover:bg-ink-50"
+            >
+              <Icon name="users" className="size-4" />
+              Link referral
+            </Link>
             <Link
               to={`${basePath}/patients/${patient.id}/edit`}
               className="inline-flex items-center gap-2 rounded-lg bg-white px-3.5 py-2 text-sm font-medium text-ink-800 ring-1 ring-inset ring-ink-300 hover:bg-ink-50"
@@ -249,6 +459,56 @@ export default function PatientProfile() {
           hint={`${formatCurrency(data.total_paid)} paid of ${formatCurrency(data.total_billed)}`}
         />
       </div>
+
+      {/* Physio Points balance */}
+      {(pointsData?.balance ?? 0) >= 0 && (
+        <PhysioPointsBanner
+          balance={pointsData?.balance ?? 0}
+          ledger={pointsData?.ledger ?? []}
+          redeemValue={pointsData?.redeem_value ?? 0.5}
+          earnPer100={pointsData?.earn_per_100 ?? 10}
+          expiryDays={pointsData?.expiry_days ?? 365}
+          role={role}
+          patientId={patientId}
+          showLedger={showPointsLedger}
+          onToggleLedger={() => setShowPointsLedger((v) => !v)}
+          adjusting={adjustingPoints}
+          onAdjust={() => setAdjustingPoints(true)}
+          onAdjustClose={() => { setAdjustingPoints(false); reloadPoints(); }}
+        />
+      )}
+
+      {/* Referral code — shareable with the patient so they can refer friends */}
+      {patient.referral_code && (
+        <ReferralCodeBanner code={patient.referral_code} />
+      )}
+
+      {/* Referral credit balances */}
+      {(data.referral_session_credits ?? 0) >= 2 && (
+        <div className="mb-2 flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <Icon name="gift" className="mt-0.5 size-5 shrink-0 text-emerald-600" />
+          <div className="text-sm text-emerald-800">
+            <span className="font-semibold">
+              {data.referral_session_credits} referrer credit session
+              {data.referral_session_credits > 1 ? 's' : ''} available
+            </span>{' '}
+            (earned by referring someone). Use <strong>Redeem 2</strong> on any active package below.
+          </div>
+        </div>
+      )}
+      {(data.referred_session_credits ?? 0) >= 2 && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+          <Icon name="gift" className="mt-0.5 size-5 shrink-0 text-blue-600" />
+          <div className="text-sm text-blue-800">
+            <span className="font-semibold">
+              {data.referred_session_credits} referred-patient credit session
+              {data.referred_session_credits > 1 ? 's' : ''} available
+            </span>{' '}
+            (earned as a referred patient). Redeemable on packages with <strong>minimum 5 sessions</strong>.
+            These are forfeited if the qualifying package is cancelled.
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {/* Basic information */}
@@ -384,29 +644,107 @@ export default function PatientProfile() {
                         send={(payload) => billingService.sendStatement(pkg.id, payload)}
                       />
                       {pkg.status === 'ACTIVE' && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={async () => {
-                            setBusy(true);
-                            try {
-                              await sessionService.cancelPackage(pkg.id, 'Cancelled from profile');
-                              await reloadAll();
-                              setBanner({
-                                tone: 'success',
-                                message:
-                                  'Package cancelled. Its sessions no longer count towards this ' +
-                                  'patient’s totals; the row is kept as history.',
-                              });
-                            } catch (err) {
-                              setBanner({ tone: 'error', message: err.message });
-                            } finally {
-                              setBusy(false);
-                            }
-                          }}
-                        >
-                          Cancel
-                        </Button>
+                        <>
+                          {/* Referrer credits — any package */}
+                          {(data.referral_session_credits ?? 0) >= 2 && redeemingPackageId !== pkg.id && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setRedeemingReferredPackageId(null);
+                                setRedeemingPackageId(pkg.id);
+                              }}
+                            >
+                              <Icon name="gift" className="size-3" />
+                              Referrer +2
+                            </Button>
+                          )}
+                          {redeemingPackageId === pkg.id && (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                loading={redeemBusy}
+                                onClick={() => handleRedeemCredit(pkg.id)}
+                              >
+                                Confirm +2
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setRedeemingPackageId(null)}
+                              >
+                                ✕
+                              </Button>
+                            </div>
+                          )}
+                          {/* Referred-patient credits — only packages with ≥5 sessions */}
+                          {(data.referred_session_credits ?? 0) >= 2 && pkg.sessions_registered >= 5 && redeemingReferredPackageId !== pkg.id && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setRedeemingPackageId(null);
+                                setRedeemingReferredPackageId(pkg.id);
+                              }}
+                            >
+                              <Icon name="gift" className="size-3" />
+                              Referred +2
+                            </Button>
+                          )}
+                          {redeemingReferredPackageId === pkg.id && (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                loading={redeemBusy}
+                                onClick={() => handleRedeemReferredCredit(pkg.id)}
+                              >
+                                Confirm +2
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setRedeemingReferredPackageId(null)}
+                              >
+                                ✕
+                              </Button>
+                            </div>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setEditingPackage(pkg)}
+                          >
+                            Edit
+                          </Button>
+                          <Link
+                            to={`${basePath}/refunds/new?package_id=${pkg.id}`}
+                            className="inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors bg-white text-ink-800 ring-1 ring-inset ring-ink-300 hover:bg-ink-50 px-2.5 py-1.5 text-xs min-h-[44px] sm:min-h-0"
+                          >
+                            Refund
+                          </Link>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                await sessionService.cancelPackage(pkg.id, 'Cancelled from profile');
+                                await reloadAll();
+                                setBanner({
+                                  tone: 'success',
+                                  message:
+                                    "Package cancelled. Its sessions no longer count towards this patient's totals; the row is kept as history.",
+                                });
+                              } catch (err) {
+                                setBanner({ tone: 'error', message: err.message });
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </>
                       )}
                       </div>
                     </Td>
@@ -494,11 +832,12 @@ export default function PatientProfile() {
                   <Th>Therapist</Th>
                   <Th>Treatment</Th>
                   <Th>Notes</Th>
+                  <Th align="right">Action</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
                 {data.sessions.map((session) => (
-                  <tr key={session.id} className="hover:bg-ink-50/60">
+                  <tr key={session.id} className={session.is_voided ? 'text-ink-400' : 'hover:bg-ink-50/60'}>
                     <Td align="right" className="font-medium text-ink-900">
                       {session.session_number}
                     </Td>
@@ -506,6 +845,17 @@ export default function PatientProfile() {
                     <Td>{session.therapist_name ?? '—'}</Td>
                     <Td>{session.treatment_provided ?? '—'}</Td>
                     <Td className="text-ink-600">{session.notes ?? '—'}</Td>
+                    <Td align="right">
+                      {!session.is_voided && patient.is_active && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setEditingSession(session)}
+                        >
+                          Edit
+                        </Button>
+                      )}
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -595,6 +945,15 @@ export default function PatientProfile() {
                             fetchPdf={() => billingService.invoicePdf(bill.id)}
                             send={(payload) => billingService.sendInvoice(bill.id, payload)}
                           />
+                          {patient.is_active && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setEditingBill(bill)}
+                            >
+                              Edit
+                            </Button>
+                          )}
                           {Number(bill.balance_amount) > 0 && patient.is_active && (
                             <Button size="sm" onClick={() => setPayingBill(bill)}>
                               Record payment
@@ -666,11 +1025,6 @@ export default function PatientProfile() {
                                         <span className="numeric shrink-0 font-medium">
                                           {formatMoney(payment.amount)}
                                         </span>
-                                        {/*
-                                          One receipt per payment: what the patient
-                                          is handed for the amount they paid today,
-                                          separate from the invoice for the bill.
-                                        */}
                                         <DocumentActions
                                           label="Receipt"
                                           patientName={patient.full_name}
@@ -679,6 +1033,15 @@ export default function PatientProfile() {
                                             billingService.sendReceipt(payment.id, payload)
                                           }
                                         />
+                                        {patient.is_active && (
+                                          <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={() => setEditingPayment(payment)}
+                                          >
+                                            Edit
+                                          </Button>
+                                        )}
                                       </span>
                                     </li>
                                   ))}
@@ -697,6 +1060,19 @@ export default function PatientProfile() {
               </tbody>
             </Table>
           )}
+        </Card>
+
+        {/* Prescriptions */}
+        <Card>
+          <CardHeader
+            title="Prescriptions"
+            description="Clinical prescriptions — downloadable as PDF or emailed to the patient."
+          />
+          <PrescriptionList
+            prescriptions={prescriptions ?? []}
+            loading={prescriptionsLoading}
+            onNew={() => setAddingPrescription(true)}
+          />
         </Card>
       </div>
 
@@ -769,13 +1145,15 @@ export default function PatientProfile() {
                 : ', paid in full.'
             } No package session was used.`,
           });
-          await reloadAll();
+          await Promise.all([reloadAll(), reloadPoints()]);
         }}
       />
 
       <RecordPaymentForm
         open={Boolean(payingBill)}
         bill={payingBill}
+        patientPoints={pointsData?.balance ?? 0}
+        pointsRedeemValue={pointsData?.redeem_value ?? 0.5}
         onClose={() => setPayingBill(null)}
         onSaved={async (bill) => {
           setPayingBill(null);
@@ -787,6 +1165,60 @@ export default function PatientProfile() {
                 : 'Paid in full.'
             }`,
           });
+          await Promise.all([reloadAll(), reloadPoints()]);
+        }}
+      />
+
+      <PrescriptionForm
+        open={addingPrescription}
+        patient={patient}
+        clinicId={patient.primary_clinic_id ?? clinics?.[0]?.id ?? null}
+        onClose={() => setAddingPrescription(false)}
+        onCreated={() => reloadPrescriptions()}
+        onPatientUpdated={() => reload()}
+      />
+
+      <SessionEditModal
+        open={Boolean(editingSession)}
+        session={editingSession}
+        therapists={sessionCtx?.therapists ?? []}
+        onClose={() => setEditingSession(null)}
+        onSaved={async () => {
+          setEditingSession(null);
+          setBanner({ tone: 'success', message: 'Session updated.' });
+          await reload();
+        }}
+      />
+
+      <BillEditModal
+        open={Boolean(editingBill)}
+        bill={editingBill}
+        onClose={() => setEditingBill(null)}
+        onSaved={async () => {
+          setEditingBill(null);
+          setBanner({ tone: 'success', message: 'Bill updated.' });
+          await reloadBills();
+        }}
+      />
+
+      <PaymentEditModal
+        open={Boolean(editingPayment)}
+        payment={editingPayment}
+        onClose={() => setEditingPayment(null)}
+        onSaved={async () => {
+          setEditingPayment(null);
+          setBanner({ tone: 'success', message: 'Payment updated.' });
+          await reloadBills();
+        }}
+      />
+
+      <PackageEditModal
+        open={Boolean(editingPackage)}
+        pkg={editingPackage}
+        onClose={() => setEditingPackage(null)}
+        onSaved={async () => {
+          setEditingPackage(null);
+          setBanner({ tone: 'success', message: 'Package updated.' });
           await reloadAll();
         }}
       />

@@ -4,13 +4,10 @@
  * Shared by package registration and the standalone "Add a charge" dialog so
  * both produce the same bill shape. The rule it encodes is that **every rupee
  * is a line**: a consultation fee is not folded into the session price, and an
- * add-on therapy is its own line rather than a silent adjustment. That is what
- * makes the total explainable to the patient standing at the desk, and what
- * lets Phase 8 report revenue per service.
+ * add-on therapy is its own line rather than a silent adjustment.
  *
- * The totals shown here are a preview. The API recomputes them from the same
- * inputs and its answer is the one that is stored -- a number a browser
- * calculated is never what gets written to a bill.
+ * Split payments are supported: e.g. ₹3000 Card + ₹1500 Cash for a ₹4500 bill.
+ * payment.splits is a list; each split becomes its own Payment row on the server.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -25,6 +22,7 @@ export const PAYMENT_METHODS = [
   { value: 'CARD', label: 'Card' },
   { value: 'BANK_TRANSFER', label: 'Bank transfer' },
   { value: 'OTHER', label: 'Other' },
+  { value: 'POINTS', label: 'Physio Points' },
 ];
 
 /** Methods where a transaction reference is worth capturing. */
@@ -32,12 +30,17 @@ const REFERENCED_METHODS = new Set(['UPI', 'CARD', 'BANK_TRANSFER']);
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+const emptySplit = () => ({ method: 'CASH', amount: '', reference: '' });
+
 export function blankBilling() {
   return {
     charges: [],
     discount: '',
     collectNow: true,
-    payment: { method: 'CASH', reference: '', amount: '', date: todayISO() },
+    payment: {
+      splits: [emptySplit()],
+      date: todayISO(),
+    },
   };
 }
 
@@ -69,32 +72,52 @@ export function billingTotals(billing, baseAmount = 0) {
  */
 export function billingPayload(billing, baseAmount = 0) {
   const { total } = billingTotals(billing, baseAmount);
-  const paid = billing.collectNow
-    ? billing.payment.amount === '' || billing.payment.amount === null
-      ? total
-      : toAmount(billing.payment.amount)
-    : 0;
+
+  if (!billing.collectNow) {
+    return {
+      additional_charges: _chargeLines(billing),
+      discount_amount: String(toAmount(billing.discount)),
+      payment: null,
+    };
+  }
+
+  const splits = billing.payment.splits;
+  // Single split with blank amount → shorthand for "full total, one method"
+  const isSingleBlank = splits.length === 1 && splits[0].amount === '';
+  const apiSplits = isSingleBlank
+    ? [{ payment_method: splits[0].method, amount: String(total), reference_number: splits[0].reference.trim() || null }]
+    : splits
+        .filter((s) => toAmount(s.amount) > 0)
+        .map((s) => ({
+          payment_method: s.method,
+          amount: String(round2(toAmount(s.amount))),
+          reference_number: s.reference.trim() || null,
+        }));
+
+  const paid = isSingleBlank ? total : round2(splits.reduce((sum, s) => sum + toAmount(s.amount), 0));
 
   return {
-    additional_charges: (billing.charges ?? []).map((line) => ({
-      description: line.description.trim(),
-      unit_price: String(toAmount(line.unit_price)),
-      quantity: Number(line.quantity) || 1,
-      item_type: line.item_type || 'OTHER',
-      service_item_id: line.service_item_id ?? null,
-    })),
+    additional_charges: _chargeLines(billing),
     discount_amount: String(toAmount(billing.discount)),
     payment:
-      billing.collectNow && paid > 0
+      paid > 0 && apiSplits.length > 0
         ? {
-            amount: String(paid),
-            payment_method: billing.payment.method,
-            reference_number: billing.payment.reference.trim() || null,
+            splits: apiSplits,
             payment_date: billing.payment.date || null,
             notes: null,
           }
         : null,
   };
+}
+
+function _chargeLines(billing) {
+  return (billing.charges ?? []).map((line) => ({
+    description: line.description.trim(),
+    unit_price: String(toAmount(line.unit_price)),
+    quantity: Number(line.quantity) || 1,
+    item_type: line.item_type || 'OTHER',
+    service_item_id: line.service_item_id ?? null,
+  }));
 }
 
 export function BillingSection({
@@ -114,18 +137,30 @@ export function BillingSection({
     billingService
       .serviceItems({ ...(clinicId ? { clinic_id: clinicId } : {}), include_inactive: false })
       .then((items) => !cancelled && setCatalogue(items))
-      // A missing catalogue must not block taking money: the custom-charge row
-      // below still works, so this is a note, not an error state.
       .catch((err) => !cancelled && setCatalogueError(err.message));
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [clinicId]);
 
   const totals = useMemo(() => billingTotals(value, baseAmount), [value, baseAmount]);
 
   const set = (patch) => onChange({ ...value, ...patch });
   const setPayment = (patch) => set({ payment: { ...value.payment, ...patch } });
+
+  // Split helpers
+  const splits = value.payment?.splits ?? [emptySplit()];
+
+  function updateSplit(index, field, val) {
+    const next = splits.map((s, i) => (i === index ? { ...s, [field]: val } : s));
+    setPayment({ splits: next });
+  }
+
+  function addSplit() {
+    setPayment({ splits: [...splits, emptySplit()] });
+  }
+
+  function removeSplit(index) {
+    setPayment({ splits: splits.filter((_, i) => i !== index) });
+  }
 
   function addCharge(line) {
     set({ charges: [...(value.charges ?? []), line] });
@@ -163,9 +198,6 @@ export function BillingSection({
           ? {
               ...line,
               ...patch,
-              // Editing a catalogue line's price or wording makes it a one-off:
-              // the link is dropped so per-service reporting is not polluted by
-              // rows that no longer reflect that service.
               service_item_id:
                 patch.description !== undefined || patch.unit_price !== undefined
                   ? null
@@ -180,12 +212,17 @@ export function BillingSection({
     set({ charges: value.charges.filter((_, i) => i !== index) });
   }
 
+  // dueNow: sum of splits (or total if single split with blank amount)
+  const isSingleBlank = splits.length === 1 && splits[0].amount === '';
   const dueNow = value.collectNow
-    ? value.payment.amount === ''
+    ? isSingleBlank
       ? totals.total
-      : toAmount(value.payment.amount)
+      : round2(splits.reduce((sum, s) => sum + toAmount(s.amount), 0))
     : 0;
   const outstanding = round2(totals.total - dueNow);
+  const splitTotal = round2(splits.reduce((sum, s) => sum + toAmount(s.amount), 0));
+  const overTotal = value.collectNow && !isSingleBlank && splitTotal > totals.total + 0.001;
+  const canAddMore = splits.length < PAYMENT_METHODS.length;
 
   return (
     <div className="space-y-4">
@@ -219,9 +256,7 @@ export function BillingSection({
           {baseLabel && (
             <div className="flex items-center justify-between px-4 py-2 text-sm">
               <span className="text-ink-700">{baseLabel}</span>
-              <span className="numeric font-medium text-ink-900">
-                {formatMoney(baseAmount)}
-              </span>
+              <span className="numeric font-medium text-ink-900">{formatMoney(baseAmount)}</span>
             </div>
           )}
 
@@ -240,9 +275,7 @@ export function BillingSection({
                   aria-label="Charge description"
                   placeholder="e.g. Consultation fee"
                   value={line.description}
-                  onChange={(event) =>
-                    updateCharge(index, { description: event.target.value })
-                  }
+                  onChange={(event) => updateCharge(index, { description: event.target.value })}
                 />
               </div>
               <div className="sm:col-span-2">
@@ -253,9 +286,7 @@ export function BillingSection({
                   step="0.01"
                   placeholder="0.00"
                   value={line.unit_price}
-                  onChange={(event) =>
-                    updateCharge(index, { unit_price: event.target.value })
-                  }
+                  onChange={(event) => updateCharge(index, { unit_price: event.target.value })}
                 />
               </div>
               <div className="sm:col-span-1">
@@ -271,12 +302,7 @@ export function BillingSection({
                 <span className="numeric text-sm font-medium text-ink-900">
                   {formatMoney(chargeLineTotal(line))}
                 </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label="Remove charge"
-                  onClick={() => removeCharge(index)}
-                >
+                <Button size="sm" variant="ghost" aria-label="Remove charge" onClick={() => removeCharge(index)}>
                   ✕
                 </Button>
               </div>
@@ -287,8 +313,7 @@ export function BillingSection({
 
       {catalogueError && (
         <Alert tone="warning">
-          The service list could not be loaded ({catalogueError}). You can still add
-          charges by hand.
+          The service list could not be loaded ({catalogueError}). You can still add charges by hand.
         </Alert>
       )}
 
@@ -299,9 +324,7 @@ export function BillingSection({
           <span className="numeric">{formatMoney(totals.gross)}</span>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3">
-          <label htmlFor="billing_discount" className="text-ink-700">
-            Discount
-          </label>
+          <label htmlFor="billing_discount" className="text-ink-700">Discount</label>
           <Input
             id="billing_discount"
             type="number"
@@ -320,98 +343,143 @@ export function BillingSection({
       </div>
 
       {/* ---------------- Payment ---------------- */}
-      <div className="rounded-lg ring-1 ring-inset ring-ink-200 px-4 py-3">
-        <label className="flex items-center gap-2 text-sm font-medium text-ink-800">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-ink-300 text-brand-600"
-            checked={value.collectNow}
-            onChange={(event) => set({ collectNow: event.target.checked })}
-          />
-          Payment received now
-        </label>
+      <div className="rounded-lg ring-1 ring-inset ring-ink-200">
+        {/* Collect-now toggle */}
+        <div className="px-4 py-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-ink-800">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-ink-300 text-brand-600"
+              checked={value.collectNow}
+              onChange={(event) => set({ collectNow: event.target.checked })}
+            />
+            Payment received now
+          </label>
 
-        {value.collectNow ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field label="Payment method" htmlFor="payment_method" required>
-              <Select
-                id="payment_method"
-                value={value.payment.method}
-                onChange={(event) => setPayment({ method: event.target.value })}
-              >
-                {PAYMENT_METHODS.map((method) => (
-                  <option key={method.value} value={method.value}>
-                    {method.label}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+          {!value.collectNow && (
+            <p className="mt-2 text-xs text-ink-500">
+              The bill is still created and shows as unpaid, so the outstanding amount is
+              visible on the patient&apos;s profile.{' '}
+              <Badge tone="warning">Unpaid</Badge>
+            </p>
+          )}
+        </div>
 
-            <Field
-              label="Amount received"
-              htmlFor="payment_amount"
-              hint="Leave blank to record the full total"
-            >
-              <Input
-                id="payment_amount"
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder={String(totals.total.toFixed(2))}
-                value={value.payment.amount}
-                onChange={(event) => setPayment({ amount: event.target.value })}
-              />
-            </Field>
+        {value.collectNow && (
+          <>
+            {/* Split rows header */}
+            <div className="flex items-center justify-between border-t border-ink-200 px-4 py-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-ink-600">
+                Payment method{splits.length > 1 ? 's' : ''}
+              </span>
+              {canAddMore && (
+                <button
+                  type="button"
+                  onClick={addSplit}
+                  className="inline-flex items-center gap-1 rounded-md border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-100"
+                >
+                  + Split payment
+                </button>
+              )}
+            </div>
 
-            <Field
-              label="Transaction / reference no."
-              htmlFor="payment_reference"
-              hint={
-                REFERENCED_METHODS.has(value.payment.method)
-                  ? 'UPI reference, card approval code, UTR'
-                  : 'Optional'
-              }
-            >
-              <Input
-                id="payment_reference"
-                value={value.payment.reference}
-                onChange={(event) => setPayment({ reference: event.target.value })}
-                placeholder="Optional"
-              />
-            </Field>
+            {/* Column labels */}
+            <div className="grid grid-cols-3 gap-x-2 px-4 pb-0 pt-1 text-xs font-medium text-ink-500">
+              <span>Method</span>
+              <span>Amount (₹)</span>
+              <span>Reference / Txn ID</span>
+            </div>
 
-            <Field label="Payment date" htmlFor="payment_date">
-              <Input
-                id="payment_date"
-                type="date"
-                value={value.payment.date}
-                onChange={(event) => setPayment({ date: event.target.value })}
-              />
-            </Field>
+            {/* One row per split */}
+            <div className="divide-y divide-ink-100">
+              {splits.map((split, index) => (
+                <div key={index} className="flex items-center gap-2 px-4 py-2">
+                  <div className="flex-1">
+                    <Select
+                      aria-label="Payment method"
+                      value={split.method}
+                      onChange={(e) => updateSplit(index, 'method', e.target.value)}
+                    >
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      aria-label="Amount"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder={
+                        index === 0 && splits.length === 1
+                          ? String(totals.total.toFixed(2))
+                          : '0.00'
+                      }
+                      value={split.amount}
+                      onChange={(e) => updateSplit(index, 'amount', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      aria-label="Reference"
+                      placeholder={REFERENCED_METHODS.has(split.method) ? 'UPI ref / UTR / approval code' : 'Optional'}
+                      value={split.reference}
+                      onChange={(e) => updateSplit(index, 'reference', e.target.value)}
+                    />
+                  </div>
+                  {splits.length > 1 ? (
+                    <button
+                      type="button"
+                      aria-label="Remove"
+                      onClick={() => removeSplit(index)}
+                      className="shrink-0 rounded px-1 py-1 text-lg leading-none text-ink-400 hover:bg-red-50 hover:text-red-600"
+                    >
+                      ×
+                    </button>
+                  ) : (
+                    <span className="w-6 shrink-0" />
+                  )}
+                </div>
+              ))}
+            </div>
 
+            {/* Running total for multi-split */}
+            {splits.length > 1 && (
+              <div className={`flex justify-end border-t border-ink-200 px-4 py-2 text-sm font-semibold ${overTotal ? 'text-red-600' : 'text-ink-900'}`}>
+                <span>Total:&nbsp;</span>
+                <span className="numeric">{formatMoney(splitTotal)}</span>
+              </div>
+            )}
+
+            {/* Payment date */}
+            <div className="border-t border-ink-200 px-4 py-3">
+              <Field label="Payment date" htmlFor="payment_date">
+                <Input
+                  id="payment_date"
+                  type="date"
+                  value={value.payment.date}
+                  onChange={(event) => setPayment({ date: event.target.value })}
+                />
+              </Field>
+            </div>
+
+            {/* Alerts */}
             {outstanding > 0 && (
-              <div className="sm:col-span-2">
+              <div className="border-t border-ink-200 px-4 pb-3">
                 <Alert tone="warning">
-                  <span className="numeric">{formatMoney(outstanding)}</span> will remain
-                  outstanding on this bill.
+                  <span className="numeric">{formatMoney(outstanding)}</span> will remain outstanding on this bill.
                 </Alert>
               </div>
             )}
-            {outstanding < 0 && (
-              <div className="sm:col-span-2">
+            {overTotal && (
+              <div className="border-t border-ink-200 px-4 pb-3">
                 <Alert tone="error">
-                  The amount received is more than the total. Reduce it, or add the extra
-                  as a charge.
+                  The total across all splits exceeds the bill total. Reduce an amount or remove a split.
                 </Alert>
               </div>
             )}
-          </div>
-        ) : (
-          <p className="mt-2 text-xs text-ink-500">
-            The bill is still created and shows as unpaid, so the outstanding amount is
-            visible on the patient&apos;s profile.{' '}
-            <Badge tone="warning">Unpaid</Badge>
-          </p>
+          </>
         )}
       </div>
     </div>
